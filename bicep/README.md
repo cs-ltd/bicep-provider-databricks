@@ -1,178 +1,362 @@
-# Databricks ARM Custom Resource Provider Integration with Bicep
+# Databricks Bicep Provider
 
-This folder contains comprehensive examples showing how to integrate Azure Databricks infrastructure automation with Bicep using ARM Custom Resource Providers as an extensibility mechanism.
+This directory contains Bicep modules for deploying and managing Azure Databricks resources using direct REST API calls through a centralized helper.
 
 ## Overview
 
-Since custom Bicep extensibility providers are not yet available for general development, this solution uses ARM Custom Resource Providers to extend Azure's REST API with custom Databricks resources and actions, enabling declarative Databricks infrastructure management through Bicep templates.
+The Databricks Bicep Provider enables Infrastructure as Code (IaC) for Databricks resources through:
+- Individual Bicep modules for each Databricks resource type
+- Centralized `Invoke-DatabricksApi` helper for consistent API interactions
+- Comprehensive test coverage using Pester framework
+- Complete workspace deployment examples
 
 ## Architecture
 
+The provider uses Azure Deployment Scripts to execute PowerShell commands that interact directly with the Databricks REST API:
+
+1. **Centralized Helper**: `helpers/Invoke-DatabricksApi.ps1` handles all API calls with consistent authentication and error handling
+2. **Bicep Modules**: Individual modules under `modules/` for each Databricks resource type
+3. **Deployment Scripts**: Azure Deployment Scripts execute PowerShell to create/manage resources
+4. **Testing Framework**: Pester tests in `tests/` directory for validation
+
+## Available Modules
+
+### Core Infrastructure
+- `cluster.bicep` - Databricks clusters with auto-scaling and custom configurations
+- `instance-pool.bicep` - Instance pools for cost-effective compute resource management
+- `job.bicep` - Databricks jobs with scheduling and notification support
+
+### Planned Modules (110+ total)
+- `workspace.bicep` - Workspace configuration and settings
+- `secret-scope.bicep` - Secret management and Key Vault integration
+- `notebook.bicep` - Notebook deployment and management
+- `library.bicep` - Library installation and management
+- `policy.bicep` - Cluster policies and governance
+- `permissions.bicep` - Access control and permissions
+- And 100+ more modules covering all Terraform provider resources
+
+## Usage
+
+### 1. Basic Cluster Deployment
+
+```bicep
+module cluster 'modules/cluster.bicep' = {
+  name: 'my-databricks-cluster'
+  params: {
+    ClusterName: 'production-cluster'
+    SparkVersion: '13.3.x-scala2.12'
+    NodeTypeId: 'Standard_DS3_v2'
+    NumWorkers: 4
+    DatabricksToken: databricksToken
+    WorkspaceUrl: 'https://adb-123456789.azuredatabricks.net'
+    CustomTags: {
+      Environment: 'Production'
+      Project: 'DataPlatform'
+    }
+  }
+}
 ```
-┌─────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
-│   Bicep Files   │───▶│  ARM Custom Resource │───▶│  Azure Functions    │
-│                 │    │      Provider        │    │  (Databricks APIs)  │
-└─────────────────┘    └──────────────────────┘    └─────────────────────┘
-                                                              │
-                                                              ▼
-                                                    ┌─────────────────────┐
-                                                    │ Databricks Workspace│
-                                                    │   (Clusters, Jobs)  │
-                                                    └─────────────────────┘
+
+### 2. Auto-scaling Cluster with Instance Pool
+
+```bicep
+module instancePool 'modules/instance-pool.bicep' = {
+  name: 'shared-instance-pool'
+  params: {
+    InstancePoolName: 'shared-compute-pool'
+    NodeTypeId: 'Standard_DS3_v2'
+    MinIdleInstances: 2
+    MaxCapacity: 20
+    DatabricksToken: databricksToken
+    WorkspaceUrl: workspaceUrl
+  }
+}
+
+module cluster 'modules/cluster.bicep' = {
+  name: 'autoscaling-cluster'
+  dependsOn: [instancePool]
+  params: {
+    ClusterName: 'auto-scaling-cluster'
+    AutoScale: true
+    MinWorkers: 2
+    MaxWorkers: 10
+    InstancePoolId: instancePool.outputs.InstancePoolId
+    DatabricksToken: databricksToken
+    WorkspaceUrl: workspaceUrl
+  }
+}
 ```
 
-## Files Description
+### 3. Scheduled ETL Job
 
-### Core Bicep Templates
+```bicep
+module etlJob 'modules/job.bicep' = {
+  name: 'daily-etl-job'
+  params: {
+    JobName: 'daily-data-processing'
+    DatabricksToken: databricksToken
+    WorkspaceUrl: workspaceUrl
+    JobSettings: {
+      notebook_task: {
+        notebook_path: '/Shared/ETL/daily-processing'
+        base_parameters: {
+          environment: 'production'
+          date: '{{ds}}'
+        }
+      }
+      existing_cluster_id: cluster.outputs.ClusterId
+    }
+    Schedule: {
+      quartz_cron_expression: '0 0 2 * * ?'
+      timezone_id: 'UTC'
+    }
+    EmailNotifications: {
+      on_success: ['data-team@company.com']
+      on_failure: ['ops-team@company.com']
+    }
+  }
+}
+```
 
-- **`databricks-provider.bicep`** - Defines the ARM Custom Resource Provider with Azure Functions backend for handling Databricks API calls
-- **`databricks-infrastructure.bicep`** - Creates Databricks resources (clusters, jobs, instance pools) using the custom provider
-- **`databricks-operations.bicep`** - Handles Databricks operations (start/stop clusters, run jobs) via deployment scripts
-- **`main.bicep`** - Main deployment template that orchestrates the complete infrastructure deployment
+### 4. Complete Workspace Deployment
 
-### CI/CD Integration
+See the comprehensive example in `examples/full-workspace-deploy/` which demonstrates:
+- Shared instance pool for cost optimization
+- Production and development clusters
+- Multiple job types (ETL, ML training, data validation)
+- Proper dependency management and resource tagging
 
-- **`azure-pipelines.yml`** - Azure DevOps pipeline for automated validation, staging, and production deployments
+## Authentication
 
-## Key Features
+### Databricks Personal Access Token
 
-### ✅ **Complete Databricks Integration**
-- **Cluster Management**: Create, start, stop, restart clusters with full configuration
-- **Job Orchestration**: Define and trigger ETL/ML jobs with dependencies
-- **Resource Optimization**: Instance pools for cost management
-- **Security**: Data security modes, encryption, and access controls
-
-### ✅ **Bicep Native Experience**
-- **Declarative Infrastructure**: Define Databricks resources using Bicep syntax
-- **Parameter Management**: Environment-specific configurations
-- **Dependency Management**: Proper resource ordering and dependencies
-- **Output Handling**: Resource IDs and endpoints for further automation
-
-### ✅ **Azure DevOps Integration**
-- **CI/CD Pipelines**: Automated validation and deployment
-- **Environment Promotion**: Staging to production workflows
-- **Secret Management**: Secure handling of Databricks tokens
-- **Testing Integration**: Automated job execution and validation
-
-## Usage Examples
-
-### 1. Deploy Custom Provider
+Store your Databricks PAT securely in Azure Key Vault:
 
 ```bash
-az deployment group create \
-  --resource-group rg-databricks \
-  --template-file databricks-provider.bicep \
-  --parameters databricksWorkspaceUrl="https://adb-123456789.azuredatabricks.net"
+az keyvault secret set \
+  --vault-name "your-keyvault" \
+  --name "databricks-token" \
+  --value "your-databricks-pat"
 ```
 
-### 2. Deploy Databricks Infrastructure
+Reference it in your Bicep templates:
 
-```bash
-az deployment group create \
-  --resource-group rg-databricks \
-  --template-file main.bicep \
-  --parameters environment=production \
-               databricksWorkspaceUrl="https://adb-123456789.azuredatabricks.net"
+```bicep
+param databricksToken string = keyVault.getSecret('databricks-token')
 ```
 
-### 3. Perform Cluster Operations
+### Required Permissions
 
-```bash
-az deployment group create \
-  --resource-group rg-databricks \
-  --template-file databricks-operations.bicep \
-  --parameters databricksProviderName="databricks-infrastructure-provider" \
-               clusterId="0123-456789-abc123" \
-               operationType="start"
+Your Databricks token needs the following permissions:
+- Cluster management (create, read, update, delete)
+- Job management (create, read, update, delete, run)
+- Instance pool management
+- Workspace object access (notebooks, libraries)
+
+## Testing
+
+### Running Tests
+
+Tests use the Pester framework and require environment variables:
+
+```powershell
+# Set required environment variables
+$env:DATABRICKS_WORKSPACE_URL = "https://adb-123456789.azuredatabricks.net"
+$env:DATABRICKS_TOKEN = "your-databricks-pat"
+
+# Run all tests
+Invoke-Pester -Path "tests/" -Recurse
+
+# Run specific module tests
+Invoke-Pester -Path "tests/cluster.Tests.ps1"
 ```
 
-## Custom Resource Types Supported
+### Test Structure
 
-### Clusters
-- **Resource Type**: `Microsoft.CustomProviders/resourceProviders/clusters`
-- **Operations**: Create, update, delete, start, stop, restart
-- **Features**: Auto-scaling, spot instances, security modes, init scripts
+Each module has corresponding tests that cover:
+- **Positive Path**: Successful resource creation with various configurations
+- **Negative Path**: Validation of error handling and parameter constraints
+- **Cleanup**: Automatic resource cleanup after test completion
 
-### Jobs
-- **Resource Type**: `Microsoft.CustomProviders/resourceProviders/jobs`
-- **Operations**: Create, update, delete, run, monitor
-- **Features**: Multi-task workflows, scheduling, notifications, retries
+## Development Guidelines
 
-### Instance Pools
-- **Resource Type**: `Microsoft.CustomProviders/resourceProviders/instancePools`
-- **Operations**: Create, update, delete
-- **Features**: Cost optimization, auto-termination, disk configuration
+### Adding New Modules
 
-### Notebooks
-- **Resource Type**: `Microsoft.CustomProviders/resourceProviders/notebooks`
-- **Operations**: Create, update, delete, import, export
-- **Features**: Version control, parameterization, execution
+When adding a new Databricks resource module:
 
-## Custom Actions Supported
+1. **Research the Terraform Resource**: Examine the corresponding Terraform resource in `/internal/.../*.go`
+2. **Map Parameters**: Convert Terraform schema to Bicep parameters with proper types and validation
+3. **Identify REST API**: Determine the Databricks REST API endpoints and methods
+4. **Create Module**: Implement the Bicep module using the established patterns
+5. **Add Tests**: Create comprehensive Pester tests for the module
+6. **Update Documentation**: Add usage examples and parameter descriptions
 
-- **`startCluster`** - Start a Databricks cluster
-- **`stopCluster`** - Stop a Databricks cluster
-- **`restartCluster`** - Restart a Databricks cluster
-- **`runJob`** - Trigger a Databricks job run
-- **`getClusterStatus`** - Get cluster status information
+### Coding Standards
 
-## Prerequisites
+- **Parameter Naming**: Use PascalCase for all parameters and outputs
+- **Descriptions**: Every parameter and output must have an `@description` annotation
+- **Security**: Use `@secure()` for sensitive parameters like tokens and passwords
+- **Validation**: Add `@allowed()` constraints where appropriate
+- **Dependencies**: Use `dependsOn` for proper resource ordering
+- **Error Handling**: Include comprehensive error handling in deployment scripts
 
-1. **Azure Subscription** with appropriate permissions
-2. **Databricks Workspace** already deployed
-3. **Databricks Personal Access Token** stored in Azure Key Vault
-4. **Azure Functions** runtime for the custom provider backend
-5. **Azure DevOps** project for CI/CD (optional)
+### Module Structure Template
 
-## Implementation Steps
+```bicep
+@description('Description of the main resource identifier')
+param ResourceName string
 
-1. **Deploy the Custom Provider**: Use `databricks-provider.bicep` to create the ARM Custom Resource Provider and Azure Functions backend
-2. **Configure Authentication**: Set up Databricks personal access tokens in Azure Key Vault
-3. **Deploy Infrastructure**: Use `databricks-infrastructure.bicep` to create clusters, jobs, and instance pools
-4. **Automate Operations**: Use `databricks-operations.bicep` for cluster lifecycle management
-5. **Set up CI/CD**: Implement the Azure DevOps pipeline for automated deployments
+@description('Databricks Personal Access Token')
+@secure()
+param DatabricksToken string
 
-## Security Considerations
+@description('Databricks workspace URL')
+param WorkspaceUrl string
 
-- **Authentication**: Uses Azure managed identity and Key Vault for secure token storage
-- **Network Security**: HTTPS-only communication with Databricks APIs
-- **Access Control**: Role-based access control for custom provider operations
-- **Encryption**: TLS encryption for all API communications
+// Additional parameters with proper types and validation
 
-## Cost Optimization
+var resourceConfig = {
+  // Map parameters to API payload structure
+}
 
-- **Spot Instances**: Configurable spot instance usage for cost savings
-- **Auto-termination**: Automatic cluster termination to prevent idle costs
-- **Instance Pools**: Shared instance pools for faster cluster startup and cost efficiency
-- **Right-sizing**: Configurable node types and worker counts per environment
+resource resourceCreation 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'create-databricks-resource-${uniqueString(ResourceName)}'
+  location: resourceGroup().location
+  kind: 'AzurePowerShell'
+  properties: {
+    azPowerShellVersion: '9.0'
+    timeout: 'PT30M'
+    retentionInterval: 'PT1H'
+    environmentVariables: [
+      {
+        name: 'DATABRICKS_TOKEN'
+        secureValue: DatabricksToken
+      }
+      {
+        name: 'WORKSPACE_URL'
+        value: WorkspaceUrl
+      }
+      {
+        name: 'RESOURCE_CONFIG'
+        value: string(resourceConfig)
+      }
+    ]
+    scriptContent: '''
+      # PowerShell script using Invoke-DatabricksApi helper
+    '''
+  }
+}
 
-## Monitoring and Troubleshooting
+@description('Output description')
+output ResourceId string = resourceCreation.properties.outputs.resourceId
+```
 
-- **Deployment Scripts**: Built-in error handling and status monitoring
-- **Azure Functions Logs**: Detailed logging for custom provider operations
-- **Databricks Audit Logs**: Integration with Databricks workspace audit logs
-- **Azure Monitor**: Integration with Azure Monitor for alerting and dashboards
+## Migration from ARM Custom Resource Provider
 
-## Limitations
+If you're migrating from the previous ARM Custom Resource Provider approach:
 
-- **Custom Provider Preview**: ARM Custom Resource Providers are in preview
-- **Function App Dependencies**: Requires Azure Functions for backend implementation
-- **API Rate Limits**: Subject to Databricks API rate limiting
-- **Regional Availability**: Limited by Azure Functions and Databricks regional availability
+1. **Replace Provider References**: Remove custom provider dependencies
+2. **Update Resource Types**: Change from custom resource types to deployment scripts
+3. **Modify Authentication**: Update to use direct token passing instead of provider authentication
+4. **Test Thoroughly**: Validate all functionality works with the new direct API approach
+
+## Best Practices
+
+### Security
+- Always use Azure Key Vault for storing Databricks tokens
+- Never hardcode sensitive values in templates
+- Use managed identities where possible for Azure resource access
+- Implement proper RBAC for deployment permissions
+
+### Resource Management
+- Use consistent naming conventions across all resources
+- Apply comprehensive tagging for cost tracking and governance
+- Implement proper lifecycle management with auto-termination settings
+- Monitor resource utilization and optimize configurations
+
+### Performance
+- Use instance pools for cost-effective compute resource sharing
+- Configure auto-scaling based on actual workload patterns
+- Enable Photon runtime for improved performance where applicable
+- Optimize Spark configurations for your specific use cases
+
+### Monitoring and Alerting
+- Set up email notifications for job failures
+- Monitor cluster utilization and costs
+- Implement alerting for long-running or failed deployments
+- Use Azure Monitor for deployment script execution tracking
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Authentication Failures**
+   ```
+   Error: Databricks API call failed: Unauthorized (Status: 401)
+   ```
+   - Verify Databricks token is valid and not expired
+   - Check token permissions for the required operations
+   - Ensure workspace URL is correct and accessible
+
+2. **Resource Creation Timeouts**
+   ```
+   Error: Cluster creation timed out after 30 attempts
+   ```
+   - Check Databricks workspace capacity and quotas
+   - Verify node types are available in the workspace region
+   - Review cluster configuration for invalid settings
+
+3. **Parameter Validation Errors**
+   ```
+   Error: The template parameter 'NodeTypeId' is not valid
+   ```
+   - Verify parameter values match Databricks API requirements
+   - Check for typos in node type IDs or other identifiers
+   - Ensure required parameters are provided
+
+### Debugging Deployment Scripts
+
+1. **View Script Logs**: Check the deployment script execution logs in Azure portal
+2. **Enable Verbose Logging**: Add `Write-Host` statements for debugging
+3. **Test API Calls**: Use the `Invoke-DatabricksApi` helper directly for testing
+4. **Validate JSON**: Ensure configuration objects are properly formatted
+
+### Getting Help
+
+- **Databricks API Documentation**: https://docs.databricks.com/dev-tools/api/latest/
+- **Azure Deployment Scripts**: https://docs.microsoft.com/en-us/azure/azure-resource-manager/templates/deployment-script-template
+- **Bicep Documentation**: https://docs.microsoft.com/en-us/azure/azure-resource-manager/bicep/
 
 ## Contributing
 
-This is an example implementation demonstrating the feasibility of Databricks integration with Bicep through ARM Custom Resource Providers. For production use, consider:
+Contributions are welcome! Please:
 
-1. Implementing comprehensive error handling in Azure Functions
-2. Adding support for additional Databricks resources (Unity Catalog, SQL warehouses, etc.)
-3. Implementing proper authentication and authorization mechanisms
-4. Adding comprehensive monitoring and alerting
-5. Implementing proper backup and disaster recovery procedures
+1. Follow the established coding standards and patterns
+2. Include comprehensive tests for new modules
+3. Update documentation with usage examples
+4. Ensure all CI checks pass before submitting PRs
+5. Keep PRs focused and under 600 lines of changes
 
-## Related Resources
+## Roadmap
 
-- [Azure Custom Resource Providers Documentation](https://docs.microsoft.com/en-us/azure/azure-resource-manager/custom-providers/)
-- [Azure Databricks REST API Reference](https://docs.databricks.com/api/azure/workspace/introduction)
-- [Bicep Documentation](https://docs.microsoft.com/en-us/azure/azure-resource-manager/bicep/)
-- [Azure Functions Documentation](https://docs.microsoft.com/en-us/azure/azure-functions/)
+### Phase 1 (Current)
+- ✅ Core infrastructure modules (cluster, instance-pool, job)
+- ✅ Centralized API helper
+- ✅ Testing framework
+- ✅ Complete workspace deployment example
+
+### Phase 2 (Next)
+- 🔄 Workspace configuration modules
+- 🔄 Security and permissions modules
+- 🔄 Data source and mount point modules
+- 🔄 Advanced job types and workflows
+
+### Phase 3 (Future)
+- ⏳ All 110+ Terraform resource equivalents
+- ⏳ Advanced features (Unity Catalog, MLflow)
+- ⏳ CI/CD integration examples
+- ⏳ Multi-workspace deployment patterns
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
