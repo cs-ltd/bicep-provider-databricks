@@ -1,0 +1,37 @@
+name: Bicep Tests
+
+on:
+  pull_request:
+    paths:
+      - 'bicep/**'
+  push:
+    branches: [main]
+    paths:
+      - 'bicep/**'
+  workflow_dispatch:
+
+jobs:
+  test-bicep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell
+        uses: azure/powershell@v1
+        with:
+          azPSVersion: 'latest'
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -Force -SkipPublisherCheck
+          Import-Module Pester
+
+      - name: Run Bicep Tests
+        shell: pwsh
+        env:
+          DATABRICKS_WORKSPACE_URL: ${{ secrets.DATABRICKS_WORKSPACE_URL }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          Invoke-Pester -Path "bicep/tests/" -Recurse -Output Detailed
